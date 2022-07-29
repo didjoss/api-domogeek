@@ -21,6 +21,37 @@ import ClassDawnDusk
 import ClassWeather
 import ClassEJP
 
+def Get_Coord_City(city):
+  rediskey =  hashlib.md5(city).hexdigest()
+  getlocation = rc.get(rediskey)
+  if getlocation is None :
+          print "NO KEY IN REDIS"
+          responsegeolocation = urllib2.urlopen(localapiurl+'/geolocation/'+city)
+          resultgeolocation = json.load(responsegeolocation)
+          latitude =  resultgeolocation["latitude"]
+          longitude =  resultgeolocation["longitude"]
+  else:
+          print city + " FOUND LOCATION IN REDIS !!! " + rediskey + " " + getlocation
+          tr1 =  getlocation.replace("(","")
+          tr2 = tr1.replace(")","")
+          data = tr2.split(',')
+          latitude = float(data[0])
+          longitude = float(data[1])
+  return latitude,longitude
+
+def Print_result(format,key,data):
+  if format == "json" :
+    web.header('Content-Type', 'application/json')
+    if key == "":
+        return json.dumps(data)
+    else:
+       try:
+        return json.dumps({key: data[key]})
+       except:
+        return json.dumps({key: data})
+  else:
+    return data
+
 # timeout in seconds
 timeout = 10
 socket.setdefaulttimeout(timeout)
@@ -39,11 +70,12 @@ ejprequest = ClassEJP.EDFejp()
 ##########
 
 listenip = "0.0.0.0"
-listenport = "80"
-localapiurl= "http://api.domogeek.fr"
+listenport = "8180"
+localapiurl= "http://127.0.0.1:" + listenport
 googleapikey = ''
 bingmapapikey = ''
 geonameskey = ''
+openweathermapapikey = ''
 worldweatheronlineapikey = ''
 
 redis_host =  "127.0.0.1"
@@ -136,31 +168,16 @@ class holiday:
         format = request[1]
       except:
         format = None
-      if request[0] == "now":
-        datenow = datetime.now()
+      datenow = datetime.now()
+      if request[0] != "all":
+        if request[0] == "tomorrow":
+          datenow = datenow + timedelta(days=1)
         year = datenow.year
         month = datenow.month
-        day = datenow.day 
+        day = datenow.day
         result = dayrequest.estferie([day,month,year])
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"holiday": result})
-        else:
-          return result
-      if request[0] == "tomorrow":
-        datenow = datetime.now()
-        datetomorrow = datenow + timedelta(days=1)
-        year = datetomorrow.year
-        month = datetomorrow.month
-        day = datetomorrow.day
-        result = dayrequest.estferie([day,month,year])
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"holiday": result})
-        else:
-          return result
-      if request[0] == "all":
-        datenow = datetime.now()
+        return Print_result(format, "holiday", result)
+      else:
         year = datenow.year
         listvalue = []
         F, J, L = dayrequest.joursferies(year,1,'/')
@@ -188,12 +205,8 @@ class holiday:
           web.badrequest()
           return "Incorrect date format : D-M-YYYY\n"
         result = dayrequest.estferie([day,month,year])
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"holiday": result})
-        else:
-          return result
-
+        return Print_result( format, "holiday", result) 
+        
 
 """
 @api {get} /weekend/:daterequest/:responsetype Week-end Status Request
@@ -221,7 +234,7 @@ class holiday:
 
 """
 class weekend:
-    def GET(self,uri):
+   def GET(self,uri):
       request = uri.split('/')
       if request == ['']:
         web.badrequest()
@@ -231,31 +244,13 @@ class weekend:
       except:
         format = None
       if request[0] == "now":
-        datenow = datetime.now()
-        daynow = datetime.now().weekday()
-        day = datenow.day
-        if daynow == 5 or daynow == 6:
-          result = "True"
-        else:
-          result = "False"
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"weekend": result})
-        else:
-          return result
+        day = datetime.now().weekday()
+        
       if request[0] == "tomorrow":
         today = date.today()
         datetomorrow = today + timedelta(days=1)
         day = datetomorrow.weekday()
-        if day == 5 or day == 6:
-          result = "True"
-        else:
-          result = "False"
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"weekend": result})
-        else:
-          return result
+        
       if request[0] != "now" and request[0] != "tomorrow":
         try:
           daterequest = request[0]
@@ -270,16 +265,15 @@ class weekend:
         except:
           web.badrequest()
           return "Incorrect date format : D-M-YYYY\n"
-        requestday = date(int(year),int(month),int(day)).weekday()
-        if requestday == 5 or requestday == 6:
+        day = date(int(year),int(month),int(day)).weekday()
+      
+      if day == 5 or day == 6:
           result = "True"
-        else:
+      else:
           result = "False"
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"weekend": result})
-        else:
-          return result
+          
+      return Print_result(format, "weekend", result)
+        
 
 """
 @api {get} /holidayall/:zone/:daterequest All Holidays Status Request
@@ -518,19 +512,22 @@ class schoolholiday:
       except:
         format = None
       datenow = datetime.now()
+      if daterequest == "tomorrow":
+        datenow = datenow + timedelta(days=1)
+      
       year = datenow.year
       month = datenow.month
       day = datenow.day
 
-      if daterequest == "now":
+      rediskey =  hashlib.md5("schoolholiday" + daterequest + zoneok).hexdigest()
+      
+      if daterequest == "now" or daterequest == "tomorrow":
         try:
-          rediskeyschoolholidaynow =  hashlib.md5("schoolholidaynow"+zoneok).hexdigest()
-          getschoolholidaynow = rc.get(rediskeyschoolholidaynow)
+          getschoolholidaynow = rc.get(rediskey)
           if getschoolholidaynow is None:
             result = school.isschoolcalendar(zoneok,day,month,year)
-            rediskeyschoolholidaynow =  hashlib.md5("schoolholidaynow"+zoneok).hexdigest()
-            rc.set(rediskeyschoolholidaynow, result, 1800)
-            rc.expire(rediskeyschoolholidaynow ,1800)
+            rc.set(rediskey, result, 1800)
+            rc.expire(rediskey ,1800)
             print "SET SCHOOL HOLIDAY "+zoneok+ " NOW IN REDIS"
           else:
             result = getschoolholidaynow
@@ -543,43 +540,7 @@ class schoolholiday:
           description = result.decode('utf-8')
         except:
           description = result
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"schoolholiday": description}, ensure_ascii=False).encode('utf8')
-        else:
-          return description
-
-      if daterequest == "tomorrow":
-        datenow = datetime.now()
-        datetomorrow = datenow + timedelta(days=1)
-        yeartomorrow = datetomorrow.year
-        monthtomorrow = datetomorrow.month
-        daytomorrow = datetomorrow.day
-        try:
-          rediskeyschoolholidaytomorrow =  hashlib.md5("schoolholidaytomorrow"+zoneok).hexdigest()
-          getschoolholidaytomorrow = rc.get(rediskeyschoolholidaytomorrow)
-          if getschoolholidaytomorrow is None:
-            result = school.isschoolcalendar(zoneok,daytomorrow,monthtomorrow,yeartomorrow)
-            rediskeyschoolholidaytomorrow =  hashlib.md5("schoolholidaytomorrow"+zoneok).hexdigest()
-            rc.set(rediskeyschoolholidaytomorrow, result, 1800)
-            rc.expire(rediskeyschoolholidaytomorrow ,1800)
-            print "SET SCHOOL HOLIDAY "+zoneok+ " TOMORROW IN REDIS"
-          else:
-            result = getschoolholidaytomorrow
-            print "FOUND SCHOOL HOLIDAY "+zoneok+" TOMORROW IN REDIS"
-        except:
-           result = school.isschoolcalendar(zoneok,daytomorrow,monthtomorrow,yeartomorrow)
-        if result == None or result == "None":
-          result = "False"
-        try:
-          description = result.decode('utf-8')
-        except:
-          description = result
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"schoolholiday": description}, ensure_ascii=False).encode('utf8')
-        else:
-          return description
+        return Print_result(format,"schoolholiday",description)
 
       if daterequest == "all":
         result = school.getschoolcalendar(zone)
@@ -589,35 +550,36 @@ class schoolholiday:
           description = result
         web.header('Content-Type', 'application/json')
         return description
-      if daterequest != "now" and daterequest != "all" and daterequest != "tomorrow":
-        try:
+      
+      try:
           result = daterequest.split('-')
-        except:
+      except:
           web.badrequest()
           return "Incorrect date format : D-M-YYYY\n"
-        try:
+      try:
           day = int(result[0])
           month = int(result[1])
           year = int(result[2])
-        except:
+      except:
           web.badrequest()
           return "Incorrect date format : D-M-YYYY\n"
-        if day > 31 or month > 12:
+      if day > 31 or month > 12:
           web.badrequest()
           return "Incorrect date format : D-M-YYYY\n"
-        result = school.isschoolcalendar(zoneok,day,month,year)
-        if result == None :
+      result = school.isschoolcalendar(zoneok,day,month,year)
+      if result == None :
           result = "False"
-        try:
+      print result
+      try:
           description = result.decode('utf-8')
-        except:
+      except:
           description = result
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"schoolholiday": description}, ensure_ascii=False).encode('utf8')
-        else:
-          return description
-
+      #if format == "json":
+      #  web.header('Content-Type', 'application/json')
+      #  return json.dumps({"schoolholiday": description}, ensure_ascii=False).encode('utf8')
+      #else:
+      #  return description
+      return Print_result(format,"schoolholiday",description)
 
 """
 @api {get} /vigilance/:department/:vigilancerequest/:responsetype Vigilance MeteoFrance 
@@ -741,9 +703,7 @@ class vigilance:
 """
 class geolocation:
     def GET(self,uri):
-      checkgoogle = False
-      checkbing = False
-      checkgeonames = False
+      check = False
       inredis = False
       request = uri.split('/')
       if request == ['']:
@@ -751,21 +711,21 @@ class geolocation:
         return "Incorrect request : /geolocation/{city}\n"
       try:
         city = request[0]
+        rediskey =  hashlib.md5(city).hexdigest()
       except:
         return "Incorrect request : /geolocation/{city}\n"
       try:
-        rediskey =  hashlib.md5(city).hexdigest()
+        
         getlocation = rc.get(rediskey)
         if getlocation is None:
           pass
         else:
-          print "FOUND LOCATION IN REDIS !!!"
+          print "FOUND LOCATION IN REDIS !!! " + rediskey
           inredis = "ok"
           tr1 =  getlocation.replace("(","")
           tr2 = tr1.replace(")","")
           data = tr2.split(',')
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"latitude": float(data[0]), "longitude": float(data[1])})
+          return Print_result('json','',{"latitude": float(data[0]), "longitude": float(data[1])})
 
       except:
         pass
@@ -775,55 +735,135 @@ class geolocation:
       else:
         try:
           data = geolocationrequest.geogoogle(city, googleapikey)
-          checkgoogle = True
-          rediskey =  hashlib.md5(city).hexdigest()
-          rc.set(rediskey, (data[0], data[1]))
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"latitude": data[0], "longitude": data[1]})
+          check = True
+          rc.set(rediskey, "(" + data[0] + ", " + data[1] + ")")
+          return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
         except:
           print "NO VALUE FROM GOOGLE"
 
-      if bingmapapikey == '' or inredis == "ok":
+      if bingmapapikey == '' or check or inredis == "ok":
         pass
       else:
-        if checkgoogle:
-          pass
-        else:
-          try:
+        try:
             data = geolocationrequest.geobing(city, bingmapapikey)
-          except:
+        except:
             print "NO VALUE FROM BING"
             data = False
-          if not data :
+        if not data :
             print "NO BING"
-          else:
-            checkbing = True
-            rediskey =  hashlib.md5(city).hexdigest()
-            rc.set(rediskey, (data[0], data[1]))
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"latitude": data[0], "longitude": data[1]})
+        else:
+          check = True
+          rc.set(rediskey, "(" + data[0] + ", " + data[1] + ")")
+          return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
 
-      if geonameskey == '' or inredis == "ok":
+      if geonameskey == '' or check or inredis == "ok":
         pass
       else:
-        if checkbing:
-          pass
-        else:
-          try:
+        try:
             data = geolocationrequest.geonames(city, geonameskey)
-          except:
+        except:
             print "NO VALUE FROM GEONAMES"
             data = False
-          if not data :
+        if not data :
             print "NO VALUE FROM GEONAMES"
-          else:
-            checkgeonames = True
-            rediskey =  hashlib.md5(city).hexdigest()
-            rc.set(rediskey, (data[0], data[1]))
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"latitude": data[0], "longitude": data[1]})
+        else:
+            check = True
+            rc.set(rediskey, "(" + data[0] + ", " + data[1] + ")")
+            return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
+      if openweathermapapikey == '' or check or inredis == "ok":
+        pass
+      else:
+        try:
+            data = geolocationrequest.openmapnames(city, openweathermapapikey)
+        except:
+            print "NO VALUE FROM OPENWEATHERMAP"
+            data = False
+        if not data :
+            print "NO VALUE FROM OPENWEATHERMAP"
+        else:
+            check = True
+            rc.set(rediskey, "(" + str(data[0]) + ", " + str(data[1]) + ")")
+            return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
+      
+      if openweathermapapikey == '' or check or inredis == "ok":
+        pass
+      else:
+        try:
+            data = geolocationrequest.openmapzip(city, openweathermapapikey)
+        except:
+            print "NO VALUE FROM OPENWEATHERMAP"
+            data = False
+        if not data :
+            print "NO VALUE FROM OPENWEATHERMAP"
+        else:
+            check = True
+            rc.set(rediskey, "(" + str(data[0]) + ", " + str(data[1]) + ")")
+            return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
+      
+      if not check and not inredis:
+         return "NO GEOLOCATION DATA AVAILABLE\n"
 
-      if not checkgoogle and not checkbing and not checkgeonames and not inredis:
+"""
+@api {get} /ziplocation/:city City Geolocation 
+@apiName GetZiplocation
+@apiGroup Domogeek
+@apiDescription Ask geolocation (latitude/longitude) :zipcode
+@apiParam {String} zip Zip Code (works only France Metropolitan).
+@apiSuccessExample Success-Response:
+     HTTP/1.1 200 OK
+     {"latitude": 48.390394000000001, "longitude": -4.4860759999999997}
+
+@apiErrorExample Error-Response:
+     HTTP/1.1 400 Bad Request
+     400 Bad Request
+
+@apiExample Example usage:
+     curl http://api.domogeek.fr/ziplocation/75000
+"""
+class ziplocation:
+    def GET(self,uri):
+      check = False
+      inredis = False
+      request = uri.split('/')
+      if request == ['']:
+        web.badrequest()
+        return "Incorrect request : /ziplocation/{city}\n"
+      try:
+        city = request[0]
+      except:
+        return "Incorrect request : /ziplocation/{city}\n"
+      try:
+        rediskey =  hashlib.md5(city).hexdigest()
+        getlocation = rc.get(rediskey)
+        if getlocation is None:
+          pass
+        else:
+          print city + " FOUND LOCATION IN REDIS !!! " + rediskey
+          inredis = "ok"
+          tr1 =  getlocation.replace("(","")
+          tr2 = tr1.replace(")","")
+          data = tr2.split(',')
+          return Print_result('json','',{"latitude": float(data[0]), "longitude": float(data[1])})
+      except:
+        pass
+
+      if openweathermapapikey == '' or check or inredis == "ok":
+        pass
+      else:
+        try:
+            data = geolocationrequest.openmapzip(city, openweathermapapikey)
+        except:
+            print "NO VALUE FROM OPENWEATHERMAP"
+            data = False
+        if not data :
+            print "NO VALUE FROM OPENWEATHERMAP"
+        else:
+            check = True
+            rediskey =  hashlib.md5(city).hexdigest()
+            rc.set(rediskey, "(" + str(data[0]) + ", " + str(data[1]) + ")")
+            return Print_result('json','',{"latitude": data[0], "longitude": data[1]})
+
+      if not check and not inredis:
          return "NO GEOLOCATION DATA AVAILABLE\n"
 
 """
@@ -889,19 +929,7 @@ class dawndusk:
       if dawnduskrequestelement not in ["sunrise", "sunset", "zenith", "dayduration", "all"]:
         return "Incorrect request : /sun/city/{sunrise|sunset|zenith|dayduration|all}/{now|tomorrow}\n"
       try:
-        rediskey =  hashlib.md5(city).hexdigest()
-        getlocation = rc.get(rediskey)
-        if getlocation is None:
-          print "NO KEY IN REDIS"
-          responsegeolocation = urllib2.urlopen(localapiurl+'/geolocation/'+city)
-          resultgeolocation = json.load(responsegeolocation)
-          latitude =  resultgeolocation["latitude"]
-          longitude =  resultgeolocation["longitude"]
-        else:
-          print "FOUND LOCATION IN REDIS !!!"
-          tr1 =  getlocation.replace("(","")
-          tr2 = tr1.replace(")","")
-          data = tr2.split(',')
+          data = Get_Coord_City(city)
           latitude = float(data[0])
           longitude = float(data[1])
       except:
@@ -915,74 +943,24 @@ class dawndusk:
       dawnduskrequest.setNumericalDate(today.day,today.month,today.year)
       dawnduskrequest.setLocation(latitude, longitude)
       dawnduskrequest.calculateWithUTC(getutc)
-      sunrise = dawnduskrequest.sunriseTime
-      zenith = dawnduskrequest.meridianTime
-      sunset = dawnduskrequest.sunsetTime
-      dayduration =dawnduskrequest.durationTime
-      if request[2] == "now" and dawnduskrequestelement == "all" :
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"sunrise": sunrise, "zenith": zenith, "sunset": sunset, "dayduration": dayduration})
-      if request[2] == "now" and dawnduskrequestelement == "sunrise" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"sunrise": sunrise})
-          else:
-            return sunrise
-      if request[2] == "now" and dawnduskrequestelement == "sunset" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"sunset": sunset})
-          else:
-            return sunset
-      if request[2] == "now" and dawnduskrequestelement == "zenith" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"zenith": zenith})
-          else:
-            return zenith
-      if request[2] == "now" and dawnduskrequestelement == "dayduration" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"dayduration": dayduration})
-          else:
-            return dayduration
-      if request[2] == "tomorrow" and dawnduskrequestelement == "all" :
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"sunrise": sunrise, "zenith": zenith, "sunset": sunset, "dayduration": dayduration})
-      if request[2] == "tomorrow" and dawnduskrequestelement == "sunrise" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"sunrise": sunrise})
-          else:
-            return sunrise
-      if request[2] == "tomorrow" and dawnduskrequestelement == "sunset" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"sunset": sunset})
-          else:
-            return sunset
-      if request[2] == "tomorrow" and dawnduskrequestelement == "zenith" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"zenith": zenith})
-          else:
-            return zenith
-      if request[2] == "tomorrow" and dawnduskrequestelement == "dayduration" :
-          if format == "json":
-            web.header('Content-Type', 'application/json')
-            return json.dumps({"dayduration": dayduration})
-          else:
-            return dayduration
-
+      data = {}
+      data['sunrise'] = dawnduskrequest.sunriseTime
+      data['zenith'] = dawnduskrequest.meridianTime
+      data['sunset'] = dawnduskrequest.sunsetTime
+      data['dayduration'] =dawnduskrequest.durationTime
+      if dawnduskrequestelement == "all" :
+          dawnduskrequestelement = ''
+      return Print_result(format, dawnduskrequestelement, data)      
+      
 """
 @api {get} /weather/:city/:weatherrequest/:date/:responsetype Weather Status Request
 @apiName GetWeather
 @apiGroup Domogeek
 @apiDescription Ask for weather (temperature, humidity, pressure, windspeed...) for :date in :city (France)
 @apiParam {String} city City name (avoid accents, no space, France Metropolitan).
-@apiParam {String} weatherrequest  Ask for {temperature|humidity[pressure|windspeed|weather|rain|all}.
-@apiParam {String} date  Date request {today | tomorrow}.
-@apiParam {String} [responsetype]  Specify Response Type (raw by default or specify json, only for single element).
+@apiParam {String} weatherrequest  Ask for {temperature|humidity|pressure|windspeed|windgust|weather|rain|snow|all}.
+@apiParam {String} date  Date request {now | today | tomorrow}.
+@apiParam {String} [responsetype]  Specify Response Type (raw by default or specify json).
 @apiSuccessExample Success-Response:
      HTTP/1.1 200 OK
      {u'min': 15.039999999999999, u'max': 20.34, u'eve': 19.989999999999998, u'morn': 20.34, u'night': 15.039999999999999, u'day': 20.34}
@@ -996,7 +974,7 @@ class dawndusk:
 
 @apiExample Example usage:
      curl http://api.domogeek.fr/weather/brest/all/today
-     curl http://api.domogeek.fr/weather/brest/pressure/today/json
+     curl http://api.domogeek.fr/weather/75000/pressure/today/json
      curl http://api.domogeek.fr/weather/brest/weather/tomorrow
      curl http://api.domogeek.fr/weather/brest/rain/today
 
@@ -1005,120 +983,64 @@ class dawndusk:
 class weather:
     def GET(self,uri):
       request = uri.split('/')
+      irequest = "Incorrect request : /weather/city|zipcode/{temperature|humidity|pressure|weather|windspeed|windgust|rain|snow|all}/{now|today|tomorrow}\n"
+
       if request == ['']:
         web.badrequest()
-        return "Incorrect request : /weather/city/{temperature|humidity|pressure|weather|windspeed|rain|all}/{today|tomorrow}\n"
+        return irequest 
       try:
         city = request[0]
       except:
-        return "Incorrect request : /weather/city/{temperature|humidity|pressure|weather|windspeed|rain|all}/{today|tomorrow}\n"
+        return irequest
       try:
         weatherrequestelement = request[1]
       except:
-        return "Incorrect request : /weather/city/{temperature|humidity|pressure|weather|windspeed|rain|all}/{today|tomorrow}\n"
+        return irequest
       try:
         daterequest = request[2]
       except:
-        return "Incorrect request : /weather/city/{temperature|humidity|pressure|weather|windspeed|rain|all}/{today|tomorrow}\n"
+        return irequest
       try:
         format = request[3]
       except:
         format = None
-      if weatherrequestelement not in ["temperature", "humidity", "pressure", "weather", "windspeed", "rain", "all"]:
-        return "Incorrect request : /weather/city/{temperature|humidity|pressure|weather|windspeed|rain|all}/{today|tomorrow}\n"
+      if weatherrequestelement not in ["temperature", "humidity", "pressure", "weather", "windspeed", "windgust", "rain", "snow", "all"]:
+        return irequest
       try:
-        rediskey =  hashlib.md5(city).hexdigest()
-        getlocation = rc.get(rediskey)
-        if getlocation is None:
-          print "NO KEY IN REDIS"
-          responsegeolocation = urllib2.urlopen(localapiurl+'/geolocation/'+city)
-          resultgeolocation = json.load(responsegeolocation)
-          latitude =  resultgeolocation["latitude"]
-          longitude =  resultgeolocation["longitude"]
-        else:
-          print "FOUND LOCATION IN REDIS !!!"
-          tr1 =  getlocation.replace("(","")
-          tr2 = tr1.replace(")","")
-          data = tr2.split(',')
+          data = Get_Coord_City(city)
           latitude = float(data[0])
           longitude = float(data[1])
       except:
         return "no data available"
-      if request[2] == "today":
-        todayweather = weatherrequest.todayopenweathermap(latitude, longitude, weatherrequestelement)
-        datenow = datetime.now()
-        datetoday = datenow.strftime('%Y-%m-%d')
-        try:
-          rediskeytodayrain = hashlib.md5(str(latitude)+str(longitude)+str(datetoday)).hexdigest()
-          gettodayrain = rc.get(rediskeytodayrain)
+      
+      datenow = datetime.now()
+      datestr = datenow.strftime('%Y-%m-%d')
+        
+      if request[2] == "now":
+        weather = weatherrequest.nowopenweathermap(latitude, longitude, weatherrequestelement, openweathermapapikey)
+      if request[2] == "today" or request[2] == "tomorrow":
+        weather = weatherrequest.forecastopenweathermap(latitude, longitude, request[2], weatherrequestelement, openweathermapapikey)
+        """
+          try:
+          rediskeyrain = hashlib.md5(str(latitude)+str(longitude)+str(datestr)).hexdigest()
+          gettodayrain = rc.get(rediskeyrain)
           if gettodayrain is None:
-            todayrain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datetoday)
-            rediskeytodayrain = hashlib.md5(str(latitude)+str(longitude)+str(datetoday)).hexdigest()
-            rc.set(rediskeytodayrain, todayrain)
-            rc.expire(rediskeytodayrain, 3600)
+            rain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datestr)
+            rc.set(rediskeyrain, rain)
+            rc.expire(rediskeyrain, 3600)
             print "SET RAIN IN REDIS"
           else:
-            todayrain = gettodayrain
+            rain = gettodayrain
             print "FOUND RAIN IN REDIS"
         except:
-          todayrain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datetoday)
-        if weatherrequestelement != "all" or weatherrequestelement != "temperature" or weatherrequestelement != "weather":
-          if format == "json":
-              web.header('Content-Type', 'application/json')
-              if weatherrequestelement == "humidity":
-                return json.dumps({"humidity": todayweather})
-              if weatherrequestelement == "pressure":
-                return json.dumps({"pressure": todayweather})
-              if weatherrequestelement == "windspeed":
-                return json.dumps({"windspeed": todayweather})
-              if weatherrequestelement == "rain":
-                return json.dumps({"rain": todayrain})
-          else:
-             if weatherrequestelement == "rain":
-               return todayrain
-             else:
-               return todayweather
-        else:
-            return todayweather
- 
-      if request[2] == "tomorrow":
-        tomorrowweather = weatherrequest.tomorrowopenweathermap(latitude, longitude, weatherrequestelement)
-        datenow = datetime.now()
-        tomorrow =  datenow + timedelta(days=1)
-        datetomorrow = tomorrow.strftime('%Y-%m-%d')
-        try:
-          rediskeytomorrowrain = hashlib.md5(str(latitude)+str(longitude)+str(datetomorrow)).hexdigest()
-          gettomorrowrain = rc.get(rediskeytomorrowrain)
-          if gettomorrowrain is None:
-            tomorrowrain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datetomorrow)
-            rediskeytomorrowrain = hashlib.md5(str(latitude)+str(longitude)+str(datetomorrow)).hexdigest()
-            rc.set(rediskeytomorrowrain, tomorrowrain)
-            rc.expire(rediskeytomorrowrain, 3600)
-            print "SET RAIN IN REDIS"
-          else:
-            tomorrowrain = gettomorrowrain
-            print "FOUND RAIN IN REDIS"
-        except:
-          tomorrowrain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datetomorrow)
-        if weatherrequestelement != "all" or weatherrequestelement != "temperature" or weatherrequestelement != "weather":
-          if format == "json":
-              web.header('Content-Type', 'application/json')
-              if weatherrequestelement == "humidity":
-                return json.dumps({"humidity": tomorrowweather})
-              if weatherrequestelement == "pressure":
-                return json.dumps({"pressure": tomorrowweather})
-              if weatherrequestelement == "windspeed":
-                return json.dumps({"windspeed": tomorrowweather})
-              if weatherrequestelement == "rain":
-                return json.dumps({"rain": tomorrowrain})
-          else:
-            if weatherrequestelement == "rain":
-              return tomorrowrain
-            else:
-              return tomorrowweather
-        else:
-           return tomorrowweather
-
+          rain = weatherrequest.getrain(latitude, longitude, worldweatheronlineapikey, datestr)
+        """ 
+      print weather
+      print weatherrequestelement
+      if weatherrequestelement == "all" :
+         weatherrequestelement = ""
+      return Print_result(format, weatherrequestelement, weather)  
+          
 """
 @api {get} /myip/:responsetype Display Public IP
 @apiName GetMyPublicIP
@@ -1145,7 +1067,6 @@ class myip:
       pass
     try:
       format = request[1]
-      print format
     except:
       format = None
     ip = web.ctx.env.get('HTTP_X_FORWARDED_FOR', web.ctx.get('ip', ''))
@@ -1153,13 +1074,8 @@ class myip:
         ip = ip.strip()
         try:
             socket.inet_aton(ip)
-            if format == "json":
-              web.header('Cache-control', 'public,max-age=0')
-              web.header('Content-Type', 'application/json')
-              return json.dumps({"myip": ip})
-            else:
-              web.header('Cache-control', 'public,max-age=0')
-              return ip
+            web.header('Cache-control', 'public,max-age=0')
+            return Print_result(format,"myip",ip)
         except socket.error:
             web.badrequest()
             pass
@@ -1204,11 +1120,8 @@ class season:
       season = 'autumn'
     else:
       season = 'winter'
-    if format == "json":
-      web.header('Content-Type', 'application/json')
-      return json.dumps({"season": season})
-    else:
-      return season
+    return Print_result(format, "season", season)
+    
 
 
 """
@@ -1270,7 +1183,6 @@ class ejpedf:
           getejptoday = rc.get(rediskeyejptoday)
           if getejptoday is None:
             result = ejprequest.EJPToday(zoneok)
-            rediskeyejptoday =  hashlib.md5("ejptoday"+zoneok).hexdigest()
             rc.set(rediskeyejptoday, result)
             rc.expire(rediskeyejptoday, 1800)
             print "SET EJP "+zoneok+" TODAY IN REDIS"
@@ -1280,11 +1192,7 @@ class ejpedf:
         except:
             result = ejprequest.EJPToday(zoneok)
 
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"ejp": result})
-        else:
-          return result
+        return Print_result(format, "ejp", result)
 
       if request[1] == "tomorrow":
         try:
@@ -1292,7 +1200,6 @@ class ejpedf:
           getejptomorrow = rc.get(rediskeyejptomorrow)
           if getejptomorrow is None:
             result = ejprequest.EJPTomorrow(zoneok)
-            rediskeyejptomorrow =  hashlib.md5("ejptomorrow"+zoneok).hexdigest()
             rc.set(rediskeyejptomorrow, result)
             rc.expire(rediskeyejptomorrow, 1800)
             print "SET EJP "+zoneok+" TOMORROW IN REDIS"
@@ -1302,11 +1209,7 @@ class ejpedf:
         except:
             result = ejprequest.EJPTomorrow(zoneok)
 
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"ejp": result})
-        else:
-          return result
+        return Print_result(format, "ejp", result)
 
 """
 @api {get} /feastedsaint/:date/:responsetype Feasted Day of Saint Request
@@ -1344,33 +1247,17 @@ class feastedsaint:
         format = request[1]
       except:
         format = None
-      if request[0] == "now":
+      if request[0] == "now" or request[0] == "tomorrow":
         datenow = datetime.now()
+        if request[0] == "tomorrow":
+          datenow = datenow + timedelta(days=1)
         month = datenow.month
         day = datenow.day
         todayrequest = str(day)+"-"+str(month)
         rediskeyfeastedsaint = hashlib.md5(todayrequest+"feastedsaint").hexdigest()
         result = rc.get(rediskeyfeastedsaint)
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"feastedsaint": result})
-        else:
-          return result
-      if request[0] == "tomorrow":
-        datenow = datetime.now()
-        datetomorrow = datenow + timedelta(days=1)
-        month = datetomorrow.month
-        day = datetomorrow.day
-        todayrequest = str(day)+"-"+str(month)
-        rediskeyfeastedsaint = hashlib.md5(todayrequest+"feastedsaint").hexdigest()
-        result = rc.get(rediskeyfeastedsaint)
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"feastedsaint": result})
-        else:
-          return result
-
-      if request[0] != "now" and request[0] != "tomorrow":
+        return Print_result(format, "feastedsaint", result)
+      else:
         try:
           daterequest = request[0]
           result = daterequest.split('-')
@@ -1388,11 +1275,7 @@ class feastedsaint:
             result = rc.get(rediskeynamefeastedsaint)
             if result is None:
               result = "no name found or incorrect date format"
-            if format == "json":
-              web.header('Content-Type', 'application/json')
-              return json.dumps({"feastedsaint": result})
-            else:
-              return result
+            return Print_result(format, "feastedsaint", result)
           except:
             web.badrequest()
             return "Incorrect date format : D-M\n"
@@ -1402,11 +1285,7 @@ class feastedsaint:
         todayrequest = str(day)+"-"+str(month)
         rediskeyfeastedsaint = hashlib.md5(todayrequest+"feastedsaint").hexdigest()
         result = rc.get(rediskeyfeastedsaint)
-        if format == "json":
-          web.header('Content-Type', 'application/json')
-          return json.dumps({"feastedsaint": result})
-        else:
-          return result
+        return Print_result(format, "feastedsaint", result)
 
 class MyDaemon(Daemon):
         def run(self):

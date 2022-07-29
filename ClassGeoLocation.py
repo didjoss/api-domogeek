@@ -56,4 +56,24 @@ class geolocation:
        latitude=latTag.replace('<lat>','').replace('</lat>','')
        longitude=lngTag.replace('<lng>','').replace('</lng>','')
        return latitude,longitude
+  
+  def openmapnames(self, addr, api_key):
+       url = "https://api.openweathermap.org/geo/1.0/direct?q=%s&limit=1&appid=%s" % (urllib.quote(addr), urllib.quote(api_key))
+       try:
+         data = urllib2.urlopen(url).read()
+       except:
+         return "Error"
+       print data
+       dom = json.loads(data)
+       return dom[0]['lat'],dom[0]['lon']      
+  
+  def openmapzip(self, addr, api_key):
+       url = "https://api.openweathermap.org/geo/1.0/zip?zip=%s,FR&limit=1&appid=%s" % (urllib.quote(addr), urllib.quote(api_key))
+       try:
+         data = urllib2.urlopen(url).read()
+       except:
+         return "Error"
+       print data
+       dom = json.loads(data)
+       return dom['lat'],dom['lon']      
         

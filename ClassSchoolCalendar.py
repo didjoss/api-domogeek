@@ -83,12 +83,6 @@ class schoolcalendar:
        cal = Calendar.from_ical(ics.read())
      except:
        return "Data offline"
-     #datenow = datetime.now()
-     #year = datenow.year
-     #month = datenow.month
-     #month = 9
-     #day = datenow.day
-     #day = 26
      today = date(year,month,day)
      startspring = u"Vacances d'\xe9t\xe9"
      endspring = u"Rentr\xe9e scolaire des \xe9l\xe8ves"

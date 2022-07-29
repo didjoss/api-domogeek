@@ -9,52 +9,25 @@
 import urllib
 from xml.dom import minidom
 
+Nom_color = ( 'Vert', 'Vert','Jaune','Orange','Rouge' )
+Nom_risk = ( 'RAS', 'vent', 'pluie-inondation', 'orages', 'inondations', 'neige-verglas', 'canicule', 'grand-froid' )
 class vigilance:
   def getvigilance(self, deprequest):
     if len(deprequest) != 2:
       return "Error in department number"
     url = 'http://vigilance.meteofrance.com/data/NXFR34_LFPW_.xml'
     dom = minidom.parse(urllib.urlopen(url))
-    def color(number):
-      if number == "0":
-       return "vert"
-      if number == "1":
-       return "vert"
-      if number == "2":
-       return "jaune"
-      if number == "3":
-       return "orange"
-      if number == "4":
-       return "rouge"
-    def risklong(number):
-      if number == "1":
-       return "vent"
-      if number == "2":
-       return "pluie-inondation"
-      if number == "3":
-       return "orages"
-      if number == "4":
-       return "inondations"
-      if number == "5":
-       return "neige-verglas"
-      if number == "6":
-       return "canicule"
-      if number == "7":
-       return "grand-froid"
-
     for all in dom.getElementsByTagName('datavigilance'):
          depart = all.attributes['dep'].value
          colorresult = all.attributes['couleur'].value
-         riskresult = "RAS"
+         riskresult = "0"
+         flood = "0"
          for risk in all.getElementsByTagName('risque'):
               riskresult = risk.attributes['valeur'].value
          for flood in all.getElementsByTagName('crue'):
               floodresult = flood.attributes['valeur'].value
-         riskresult = risklong(riskresult)
-         floodresult = color(floodresult)
          if not riskresult: 
-           riskresult = "RAS"
+           riskresult = "0"
          if depart == deprequest:
-           color = color(colorresult)
-           return color, riskresult, floodresult
-
+           return Nom_color[int(colorresult)],Nom_risk[int(riskresult)],Nom_color[int(floodresult)]
+           
